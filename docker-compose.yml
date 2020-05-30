@@ -1,0 +1,106 @@
+version: "3.7"
+services:
+  es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.6.0
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      - bootstrap.memory_lock=true
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx750m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    user: 'elasticsearch'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./data/es:/usr/share/elasticsearch/data
+      - ./scripts/elastic:/usr/share/elasticsearch/scripts
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.6.0
+    environment:
+      SERVER_NAME: kibana
+      ELASTICSEARCH_HOSTS: http://es:9200
+    ports:
+      - 5601:5601
+
+  zookeeper:
+    image: wurstmeister/zookeeper
+    ports:
+      - 2181:2181
+  kafka:
+    image: "wurstmeister/kafka:${KAFKA_VERSION:-2.12-2.2.1}"
+    depends_on:
+      - zookeeper
+    ports:
+      - 9092:9092
+    working_dir: /opt/kafka
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: "${DOCKER_HOST_IP:?Your docker host ip(Note: Do not use localhost or 127.0.0.1 as the host ip if you want to run multiple brokers.)}"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "gdelk_export:1:1,gdelk_gkg:1:1,gdelk_mentions:1:1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: 'false'
+      KAFKA_AUTO_LEADER_REBALANCE_ENABLE: 'false'
+      KAFKA_LOG_DIRS: /kafka/logs
+    volumes:
+      - ./data/kafka/logs:/kafka/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+  kafka-manager:
+    image: sheepkiller/kafka-manager:alpine
+    ports:
+      - 9000:9000
+    depends_on:
+      - kafka
+    links:
+      - kafka
+      - zookeeper
+    environment:
+      ZK_HOSTS: zookeeper:2181
+      APPLICATION_SECRET: letmein
+      KM_ARGS: -Djava.net.preferIPv4Stack=true
+
+  airflow:
+    image: puckel/docker-airflow:1.10.9
+    restart: always
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    volumes:
+      - ./dags:/usr/local/airflow/dags
+      - ./airflow-requirements.txt:/requirements.txt
+      - ./scripts:/usr/local/airflow/scripts
+      - ./ingest:/usr/local/airflow/ingest
+      - ./storage:/usr/local/airflow/storage
+      - ./.ssh/id_rsa:/usr/local/airflow/spark/ssh/id_rsa
+      - ./data:/data
+    ports:
+      - 8888:8080
+    command: webserver
+    environment:
+      - FERNET_KEY=pnTXzBffQBori7x9wA3F5dVwpt32aNh1qsrzjl5V6WU=
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /usr/local/airflow/airflow-webserver.pid ]"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+  spark-standalone:
+    image: 5200710/spark:2.4.4-standalone
+    hostname: spark.dc
+    ports:
+      - 8080:8080
+      - 8081:8081
+      - 7077:7077
+    volumes:
+      - .ssh:/root/.ssh
+      - ./processing:/spark/processing
