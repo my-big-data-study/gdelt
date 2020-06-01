@@ -6,7 +6,6 @@ from pyspark.sql import SparkSession
 
 class GdeltJob:
     def __init__(self, **kwargs):
-        self.export_source = kwargs.get('exportSource')
         self.source = kwargs.get('source')
 
     def operate_data(self, spark):
@@ -35,7 +34,6 @@ class GdeltJob:
 
 def load_args(argv):
     parser = ArgumentParser()
-    parser.add_argument('--exportSource')
     parser.add_argument('--source')
     parser.add_argument('--esUrl')
     parser.add_argument('--esPort')
